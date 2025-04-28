@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Газовые процессы</title>
+  <style>
+    body {
+      margin: 0; padding: 20px;
+      font-family: Arial, sans-serif;
+      background: #f0f0f0;
+      text-align: center;
+    }
+    .controls {
+      margin-bottom: 15px;
+    }
+    label, select, input, button {
+      margin: 0 5px; padding: 5px;
+      font-size: 14px;
+    }
+    #simCanvas, #pvChart {
+      background: #fff;
+      border: 2px solid #333;
+      display: block;
+      margin: 10px auto;
+    }
+    #info {
+      margin: 10px 0;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Газовые процессы</h1>
+
+  <div class="controls">
+    Газ:
+    <select id="gasSelect">
+      <option value="O2">Кислород (O₂)</option>
+      <option value="N2">Азот (N₂)</option>
+      <option value="H2">Водород (H₂)</option>
+      <option value="He">Гелий (He)</option>
+    </select>
+    Масса газа, кг:
+    <input type="number" id="massInput" value="0.032" step="0.001" min="0.0001">
+    Температура, K:
+    <input type="number" id="tempInput" value="300" step="10" min="1">
+    Объём от, м³:
+    <input type="number" id="vStart" value="0.5" step="0.1" min="0.1">
+    до:
+    <input type="number" id="vEnd"   value="2.0" step="0.1" min="0.1">
+    Тип процесса:
+    <select id="processType" onchange="updateFields()">
+      <option value="iso">Изотермический</option>
+      <option value="isoBaric">Изобарный</option>
+      <option value="isoChoric">Изохорный</option>
+    </select>
+    <button onclick="applySettings()">Применить</button>
+  </div>
+
+  <div id="info">
+    <div id="pressureDisplay">Давление: — Па</div>
+    <div id="molesDisplay">Моль (n): —</div>
+  </div>
+
+  <canvas id="simCanvas" width="800" height="300"></canvas>
+  <canvas id="pvChart"  width="800" height="300"></canvas>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    // Константы
+    const R = 8.314, NA = 6.022e23;
+    const GAS_MOLAR_MASS = { O2:32e-3, N2:28e-3, H2:2e-3, He:4e-3 };
+
+    // DOM
+    const gasSel    = document.getElementById('gasSelect');
+    const massIn    = document.getElementById('massInput');
+    const tempIn    = document.getElementById('tempInput');
+    const vStartIn  = document.getElementById('vStart');
+    const vEndIn    = document.getElementById('vEnd');
+    const processSel= document.getElementById('processType');
+    const presDisp  = document.getElementById('pressureDisplay');
+    const molesDisp = document.getElementById('molesDisplay');
+    const simC      = document.getElementById('simCanvas');
+    const simCtx    = simC.getContext('2d');
+    const chartCtx  = document.getElementById('pvChart').getContext('2d');
+
+    // Chart.js
+    const pvChart = new Chart(chartCtx, {
+      type: 'line',
+      data: { labels: [], datasets: [{ label:'P(V)', data:[], borderColor:'blue', fill:false }] },
+      options: {
+        responsive: false,
+        scales: {
+          x: { title:{ display:true, text:'V (м³)' } },
+          y: { title:{ display:true, text:'P (Па)' } }
+        }
+      }
+    });
+
+    // Молекулы
+    const Np = 80;
+    let particles=[], containerTop=20, maxHeight=simC.height-20, Vmax=2.0;
+
+    class Particle {
+      constructor(){ this.reset(); }
+      reset(){
+        this.r=3;
+        this.x=Math.random()*(simC.width-2*this.r)+this.r;
+        this.y=containerTop+Math.random()*(maxHeight-2*this.r)+this.r;
+        this.updateSpeed();
+      }
+      updateSpeed(){
+        const T=parseFloat(tempIn.value);
+        const M=GAS_MOLAR_MASS[gasSel.value], m=M/NA, k=R/NA;
+        const v=Math.sqrt(3*k*T/m)*0.002;
+        const a=Math.random()*2*Math.PI;
+        this.vx=v*Math.cos(a); this.vy=v*Math.sin(a);
+      }
+      move(){
+        this.x+=this.vx;
+        if(this.x<this.r||this.x>simC.width-this.r) this.vx*=-1;
+        this.y+=this.vy;
+        if(this.y<containerTop+this.r||this.y>simC.height-this.r) this.vy*=-1;
+      }
+      draw(){
+        simCtx.beginPath();
+        simCtx.arc(this.x,this.y,this.r,0,2*Math.PI);
+        simCtx.fillStyle='red';
+        simCtx.fill();
+      }
+    }
+
+    function initParticles(){
+      particles=[];
+      for(let i=0;i<Np;i++) particles.push(new Particle());
+    }
+
+    function animateSim(){
+      simCtx.clearRect(0,0,simC.width,simC.height);
+      simCtx.strokeStyle='#333';
+      simCtx.strokeRect(0,containerTop,simC.width,maxHeight);
+      particles.forEach(p=>{ p.move(); p.draw(); });
+      requestAnimationFrame(animateSim);
+    }
+
+    function updateFields(){
+      const isoCh= processSel.value==='isoChoric';
+      tempIn.disabled = false;
+      vStartIn.disabled = isoCh;
+      vEndIn.disabled   = isoCh;
+    }
+
+    function applySettings(){
+      // читаем входные
+      const M   = GAS_MOLAR_MASS[gasSel.value];
+      const mTot= parseFloat(massIn.value);
+      const T1  = parseFloat(tempIn.value);
+      const T2  = T1;           // T2 определяется, пусть равна T1
+      const V1  = parseFloat(vStartIn.value);
+      const V2  = parseFloat(vEndIn.value);
+      const proc= processSel.value;
+      const n   = mTot/M;
+      molesDisp.textContent = `Моль (n): ${n.toFixed(4)}`;
+
+      // настройки графика осей и метки
+      if(proc==='isoChoric'){
+        pvChart.options.scales.x.title.text = 'T (K)';
+        pvChart.data.datasets[0].label = 'P(T)';
+      } else {
+        pvChart.options.scales.x.title.text = 'V (м³)';
+        pvChart.data.datasets[0].label = 'P(V)';
+      }
+
+      // заполнение данных
+      const STEPS=100;
+      pvChart.data.labels.length = 0;
+      pvChart.data.datasets[0].data.length = 0;
+      Vmax = Math.max(V1,V2);
+
+      let Pstart=0, Pend=0;
+      if(proc==='iso'){
+        for(let i=0;i<=STEPS;i++){
+          const V=V1+(V2-V1)*(i/STEPS);
+          const P=n*R*T1/V;
+          pvChart.data.labels.push(V.toFixed(2));
+          pvChart.data.datasets[0].data.push(P.toFixed(2));
+          if(i===0)   Pstart=P;
+          if(i===STEPS) Pend=P;
+        }
+      } else if(proc==='isoBaric'){
+        const P=n*R*T1/V1;
+        Pstart=Pend=P;
+        for(let i=0;i<=STEPS;i++){
+          const V=V1+(V2-V1)*(i/STEPS);
+          pvChart.data.labels.push(V.toFixed(2));
+          pvChart.data.datasets[0].data.push(P.toFixed(2));
+        }
+      } else { // isoChoric
+        for(let i=0;i<=STEPS;i++){
+          const T= T1 + (T2-T1)*(i/STEPS);
+          const P= n*R*T/V1;
+          pvChart.data.labels.push(T.toFixed(0));
+          pvChart.data.datasets[0].data.push(P.toFixed(2));
+          if(i===0)    Pstart=P;
+          if(i===STEPS) Pend=P;
+        }
+      }
+      pvChart.update();
+
+      // показываем начальное/конечное давление
+      presDisp.innerHTML = `
+        <span style="color:green;">Начальное давление: ${Pstart.toFixed(2)} Па</span><br>
+        <span style="color:${Pend<Pstart?'red':'blue'};">
+          Конечное давление: ${Pend.toFixed(2)} Па
+        </span>
+      `;
+
+      // анимация поршня/объёма
+      let step=0;
+      function anim(){
+        const frac = step/STEPS;
+        if(proc!=='isoChoric'){
+          const Vcur = V1 + (V2-V1)*frac;
+          const h = Vcur/Vmax*maxHeight;
+          containerTop = simC.height - h;
+          initParticles();
+        } else {
+          // при изохорном поршень не двигается, молекулы уже обновятся по tempIn.value
+        }
+        step++;
+        if(step<=STEPS) setTimeout(anim,50);
+      }
+      anim();
+    }
+
+    // старт
+    updateFields();
+    initParticles();
+    animateSim();
+  </script>
+</body>
+</html>
